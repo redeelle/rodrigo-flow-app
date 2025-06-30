@@ -4,41 +4,51 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import datetime
 import pandas as pd
-import json # Importa para lidar com a chave do Firebase vinda dos secrets
+import json
 
 # --- Configuração Inicial do Streamlit ---
 st.set_page_config(
     layout="wide",
     page_title="RODRIGO.FLOW™ - Performance Simbólica",
-    page_icon=""
+    page_icon="🧠"
 )
 
 # --- CONFIGURAÇÃO DA OPENAI ---
-# Substitua "SUA_CHAVE_AQUI" pela sua chave real da OpenAI.
-# Recomenda-se usar st.secrets["OPENAI_API_KEY"] para ambientes de produção online.
-client = OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", "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"))
-
+# Buscando a chave da OpenAI dos Streamlit Secrets.
+try:
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+except KeyError:
+    st.error("Erro: A chave da OpenAI (OPENAI_API_KEY) não foi encontrada nos secrets do Streamlit. Por favor, adicione-a.")
+    st.stop()
 
 # --- CONEXÃO COM O FIREBASE ---
-# Esta função inicializa o Firebase Admin SDK.
-# Ela verifica se o aplicativo Firebase já foi inicializado para evitar erros
-# de dupla inicialização, comuns em apps Streamlit.
 if not firebase_admin._apps:
     try:
-        # ATENÇÃO: Para deploy online (Streamlit Cloud), a chave do Firebase deve vir dos st.secrets.
-        # No seu secrets.toml ou nas configurações de secrets do Streamlit Cloud,
-        # adicione uma entrada como:
-        # FIREBASE_SERVICE_ACCOUNT_KEY = """{"type": "service_account", "project_id": "...", etc.}"""
-        # (O conteúdo COMPLETO do seu firebase_key.json, formatado como string, entre """ """)
+        # Buscando a chave do Firebase dos Streamlit Secrets.
+        # A chave deve ser o JSON completo da conta de serviço, como string.
+        firebase_credentials_json_string = st.secrets["FIREBASE_SERVICE_ACCOUNT_KEY"]
+        
+        # Carrega a string JSON para um dicionário Python.
+        # O Streamlit já garante que as quebras de linha da private_key (se for o caso) sejam mantidas.
+        service_account_info = json.loads(firebase_credentials_json_string)
 
-        # Carrega as credenciais a partir do conteúdo JSON do segredo do Streamlit
-        firebase_credentials_json = st.secrets["FIREBASE_SERVICE_ACCOUNT_KEY"]
-        cred = credentials.Certificate(json.loads(firebase_credentials_json))
+        # Usa o dicionário para criar as credenciais e inicializar o app Firebase.
+        cred = credentials.Certificate(service_account_info)
         firebase_admin.initialize_app(cred)
-        # st.sidebar.success("Conexão com Firebase estabelecida.") # Opcional: para depuração
+    except KeyError:
+        st.error("Erro: A chave do Firebase (FIREBASE_SERVICE_ACCOUNT_KEY) não foi encontrada nos secrets do Streamlit. Por favor, adicione-a.")
+        st.info("Certifique-se de colar o JSON COMPLETO, baixado do Firebase, no Streamlit Secrets, entre aspas triplas ('''...''').")
+        st.stop()
+    except json.JSONDecodeError as e:
+        st.error(f"Erro ao decodificar o JSON do Firebase: {e}")
+        st.info("Verifique se o JSON da chave do Firebase nos Streamlit Secrets está correto. Provavelmente, falta uma aspa tripla ou há um erro na formatação JSON.")
+        st.exception(e)
+        st.stop()
     except Exception as e:
-        st.error(f"Erro ao inicializar Firebase: {e}")
+        st.error(f"Erro inesperado ao inicializar Firebase: {e}")
         st.info("Verifique as credenciais do Firebase nos Streamlit secrets.")
+        st.exception(e)
+        st.stop()
 
 # Conecta ao Firestore Database
 db = firestore.client()
@@ -57,7 +67,7 @@ def salvar_interacao(vendedor_input, ia_perfil, ia_reacao, ia_estrategia, ia_dic
             'estrategia_ia': ia_estrategia,
             'mini_treinamento_ia': ia_dica,
             'aplicou_estrategia': aplicou_estrategia,
-            'nome_vendedor': nome_vendedor, # Adicionado campo para nome do vendedor
+            'nome_vendedor': nome_vendedor,
             'data_hora': data_atual
         })
         st.success("Interação salva com sucesso no banco de dados!")
@@ -65,9 +75,6 @@ def salvar_interacao(vendedor_input, ia_perfil, ia_reacao, ia_estrategia, ia_dic
         st.error(f"Falha ao salvar a interação: {e}")
 
 # --- FUNÇÃO PARA LER TODOS OS DADOS DO FIREBASE ---
-# st.cache_data armazena em cache os resultados desta função,
-# o que significa que ela não será executada novamente (e não fará uma nova chamada ao Firebase)
-# a menos que seus parâmetros mudem ou o cache seja limpo explicitamente.
 @st.cache_data
 def carregar_dados_interacoes():
     try:
@@ -79,11 +86,10 @@ def carregar_dados_interacoes():
         
         if dados:
             df = pd.DataFrame(dados)
-            # Converte a coluna 'data_hora' para datetime para facilitar ordenação/filtragem
             df['data_hora'] = pd.to_datetime(df['data_hora'])
             return df
         else:
-            return pd.DataFrame() # Retorna um DataFrame vazio se não houver dados
+            return pd.DataFrame()
     except Exception as e:
         st.error(f"Erro ao carregar dados do Firebase: {e}")
         return pd.DataFrame()
@@ -91,12 +97,10 @@ def carregar_dados_interacoes():
 
 # --- INÍCIO DA INTERFACE DO STREAMLIT ---
 
-# Cria abas para Vendedor e Gestor
 tab_vendedor, tab_gestor = st.tabs(["Vendedor (Análise Rápida)", "Gestor (Painel de Performance)"])
 
-# --- CONTEÚDO DA ABA 'VENDEDOR' ---
 with tab_vendedor:
-    st.header("RODRIGO.FLOW™: Seu Treinador de Vendas Pessoal")
+    st.header("🧠 RODRIGO.FLOW™: Seu Treinador de Vendas Pessoal")
     st.markdown("Bem-vindo(a), Guerreiro(a)! Conte-me sua batalha mais recente.")
 
     vendedor_nome = st.text_input("Seu nome (opcional, para relatórios):", key="vendedor_nome_input")
@@ -156,12 +160,10 @@ with tab_vendedor:
                 ia_response = response_openai.choices[0].message.content
                 st.markdown(ia_response)
 
-                # Guarda a resposta COMPLETA da IA e o input original na "sessão" do Streamlit
                 st.session_state['ia_response_completa'] = ia_response
                 st.session_state['input_do_vendedor'] = user_input
-                st.session_state['vendedor_nome'] = vendedor_nome # Guarda o nome do vendedor também
+                st.session_state['vendedor_nome'] = vendedor_nome
 
-                # Extrai os pedaços da resposta da IA para salvar separadamente
                 perfil_ia = "Não identificado"
                 reacao_ia = "Não identificado"
                 estrategia_ia = "Não identificado"
@@ -185,14 +187,13 @@ with tab_vendedor:
         else:
             st.warning("Por favor, descreva a objeção para que eu possa ajudar!")
 
-    # BOTÕES DE FEEDBACK (Só aparecem depois que a IA responde)
     if 'ia_response_completa' in st.session_state:
         st.markdown("---")
-        st.subheader("Hora da Ação!")
+        st.subheader("💡 Hora da Ação!")
         st.write("Você aplicou a estratégia sugerida? Isso é vital para sua evolução!")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Sim, apliquei!", key="btn_apliquei_vendedor"):
+            if st.button("✅ Sim, apliquei!", key="btn_apliquei_vendedor"):
                 salvar_interacao(
                     st.session_state['input_do_vendedor'],
                     st.session_state['perfil_ia_parsed'],
@@ -200,17 +201,16 @@ with tab_vendedor:
                     st.session_state['estrategia_ia_parsed'],
                     st.session_state['dica_ia_parsed'],
                     "Sim",
-                    st.session_state.get('vendedor_nome', "Não informado") # Pega o nome do vendedor
+                    st.session_state.get('vendedor_nome', "Não informado")
                 )
-                # Limpa a sessão para a próxima interação
                 for key_to_del in ['ia_response_completa', 'input_do_vendedor', 'perfil_ia_parsed', 
                                     'reacao_ia_parsed', 'estrategia_ia_parsed', 'dica_ia_parsed', 'vendedor_nome']:
                     if key_to_del in st.session_state:
                         del st.session_state[key_to_del]
-                st.rerun() # Reruns the app to clear the displayed AI response and buttons
+                st.rerun()
 
         with col2:
-            if st.button("Ainda não / Não se aplica", key="btn_nao_se_aplica_vendedor"):
+            if st.button("❌ Ainda não / Não se aplica", key="btn_nao_se_aplica_vendedor"):
                 salvar_interacao(
                     st.session_state['input_do_vendedor'],
                     st.session_state['perfil_ia_parsed'],
@@ -218,56 +218,52 @@ with tab_vendedor:
                     st.session_state['estrategia_ia_parsed'],
                     st.session_state['dica_ia_parsed'],
                     "Não",
-                    st.session_state.get('vendedor_nome', "Não informado") # Pega o nome do vendedor
+                    st.session_state.get('vendedor_nome', "Não informado")
                 )
-                # Limpa a sessão
                 for key_to_del in ['ia_response_completa', 'input_do_vendedor', 'perfil_ia_parsed', 
                                     'reacao_ia_parsed', 'estrategia_ia_parsed', 'dica_ia_parsed', 'vendedor_nome']:
                     if key_to_del in st.session_state:
                         del st.session_state[key_to_del]
-                st.rerun() # Reruns the app
+                st.rerun()
 
-# --- CONTEÚDO DA ABA 'GESTOR' ---
 with tab_gestor:
-    st.header("Painel de Performance RODRIGO.FLOW™ do Gestor")
+    st.header("📊 Painel de Performance RODRIGO.FLOW™ do Gestor")
     st.markdown("Visão Estratégica e Simbólica do Desempenho do Time de Vendas.")
 
     st.subheader("Atualização de Dados")
-    # Botão para recarregar os dados do Firebase, limpando o cache
-    if st.button("Carregar/Atualizar Dados Mais Recentes", key="btn_recarregar_dados"):
-        st.cache_data.clear() # Limpa o cache para forçar a leitura do Firebase
-        st.rerun() # Reinicia o app para carregar os novos dados
+    if st.button("🔄 Carregar/Atualizar Dados Mais Recentes", key="btn_recarregar_dados"):
+        st.cache_data.clear()
+        st.rerun()
 
     dados_interacoes = carregar_dados_interacoes()
 
     if dados_interacoes.empty:
         st.info("Nenhum dado de interação encontrado para exibir o painel. Incentive seus vendedores a usar a aba 'Vendedor'!")
     else:
-        st.subheader("Filtrar por Período")
-        # Filtro de data
-        min_date = dados_interacoes['data_hora'].min().date() if not dados_interacoes.empty else datetime.date.today()
-        max_date = dados_interacoes['data_hora'].max().date() if not dados_interacoes.empty else datetime.date.today()
+        st.subheader("📅 Filtrar por Período")
+        min_date_available = dados_interacoes['data_hora'].min().date() if not dados_interacoes.empty else datetime.date.today()
+        max_date_available = dados_interacoes['data_hora'].max().date() if not dados_interacoes.empty else datetime.date.today()
 
         col_start_date, col_end_date = st.columns(2)
         with col_start_date:
-            start_date = st.date_input("Data de Início", value=min_date, min_value=min_date, max_value=max_date)
+            start_date = st.date_input("Data de Início", value=min_date_available, min_value=min_date_available, max_value=max_date_available, key="start_date_filter")
         with col_end_date:
-            end_date = st.date_input("Data Final", value=max_date, min_value=min_date, max_value=max_date)
+            end_date = st.date_input("Data Final", value=max_date_available, min_value=min_date_available, max_value=max_date_available, key="end_date_filter")
 
         dados_filtrados = dados_interacoes[
             (dados_interacoes['data_hora'].dt.date >= start_date) &
             (dados_interacoes['data_hora'].dt.date <= end_date)
-        ].copy() # Usar .copy() para evitar SettingWithCopyWarning
+        ].copy()
 
         if dados_filtrados.empty:
             st.warning("Nenhum dado encontrado para o período selecionado.")
         else:
             st.write("---")
             st.header("Visão Geral das Interações Registradas")
-            st.dataframe(dados_filtrados.sort_values(by='data_hora', ascending=False)) # Exibe todos os dados em formato de tabela, ordenados
+            st.dataframe(dados_filtrados.sort_values(by='data_hora', ascending=False), use_container_width=True)
 
             st.write("---")
-            st.header("Perfis Comportamentais Detectados")
+            st.header("🎯 Perfis Comportamentais Detectados")
             if 'perfil_ia' in dados_filtrados.columns:
                 contagem_perfis = dados_filtrados['perfil_ia'].value_counts()
                 st.bar_chart(contagem_perfis)
@@ -275,14 +271,14 @@ with tab_gestor:
                 st.warning("Coluna 'perfil_ia' não encontrada nos dados filtrados.")
 
             st.write("---")
-            st.header("Taxa de Aplicação das Estratégias Sugeridas")
+            st.header("📈 Taxa de Aplicação das Estratégias Sugeridas")
             if 'aplicou_estrategia' in dados_filtrados.columns:
                 contagem_aplicacao = dados_filtrados['aplicou_estrategia'].value_counts()
                 total_interacoes = contagem_aplicacao.sum()
-                if total_interacoes > 0 and 'Sim' in contagem_aplicacao:
+                if total_interacoes > 0 and 'Sim' in contagem_aplicacao.index:
                     percentual_aplicado = (contagem_aplicacao['Sim'] / total_interacoes) * 100
                     st.metric(label="Percentual de Estratégias Aplicadas", value=f"{percentual_aplicado:.2f}%", 
-                            delta=f"{contagem_aplicacao.get('Sim', 0)} de um total de {total_interacoes}")
+                            delta=f"{contagem_aplicacao.get('Sim', 0)} de um total de {total_interacoes} interações")
                 else:
                     st.info("Nenhuma estratégia aplicada ou interação registrada no período.")
                 st.bar_chart(contagem_aplicacao)
@@ -290,57 +286,54 @@ with tab_gestor:
                 st.warning("Coluna 'aplicou_estrategia' não encontrada nos dados filtrados.")
 
             st.write("---")
-            st.header("Desempenho por Vendedor")
-            if 'nome_vendedor' in dados_filtrados.columns:
-                # Agrupar por vendedor e contar perfis e aplicações
-                desempenho_vendedores = dados_filtrados.groupby('nome_vendedor').agg(
+            st.header("🧑‍💻 Desempenho por Vendedor")
+            dados_com_nome = dados_filtrados[dados_filtrados['nome_vendedor'] != "Não informado"].copy()
+
+            if not dados_com_nome.empty:
+                desempenho_vendedores = dados_com_nome.groupby('nome_vendedor').agg(
                     total_interacoes=('nome_vendedor', 'size'),
                     aplicadas=('aplicou_estrategia', lambda x: (x == 'Sim').sum()),
                     nao_aplicadas=('aplicou_estrategia', lambda x: (x == 'Não').sum()),
                     perfis_dominantes=('perfil_ia', lambda x: x.mode()[0] if not x.mode().empty else 'Não definido')
                 ).reset_index()
                 desempenho_vendedores['% Aplicadas'] = (desempenho_vendedores['aplicadas'] / desempenho_vendedores['total_interacoes'] * 100).fillna(0).round(2)
-                st.dataframe(desempenho_vendedores.sort_values(by='% Aplicadas', ascending=False))
+                
+                st.dataframe(desempenho_vendedores.sort_values(by='% Aplicadas', ascending=False), use_container_width=True)
 
-                # Vendedores em Alerta Vermelho
-                st.subheader("Vendedores em Alerta (Perfis Não Guerreiros predominantes)")
-                if 'perfil_ia' in dados_filtrados.columns:
-                    # Contar as ocorrências de cada perfil por vendedor
-                    alertas_por_vendedor = dados_filtrados[dados_filtrados['perfil_ia'] != 'O Guerreiro'].groupby(['nome_vendedor', 'perfil_ia']).size().unstack(fill_value=0)
+                st.subheader("🚨 Vendedores em Alerta (Perfis Não Guerreiros predominantes)")
+                if 'perfil_ia' in dados_com_nome.columns:
+                    alertas_por_vendedor = dados_com_nome[dados_com_nome['perfil_ia'] != 'O Guerreiro'].groupby(['nome_vendedor', 'perfil_ia']).size().unstack(fill_value=0)
                     if not alertas_por_vendedor.empty:
-                        st.dataframe(alertas_por_vendedor)
+                        st.dataframe(alertas_por_vendedor, use_container_width=True)
                         st.markdown("---")
-                        # Gráfico visual de alertas por vendedor
                         st.bar_chart(alertas_por_vendedor.sum(axis=1).sort_values(ascending=False))
                     else:
-                        st.success("Nenhum perfil não-Guerreiro predominante em alerta no período!")
+                        st.success("🎉 Nenhum perfil não-Guerreiro predominante em alerta no período para vendedores identificados!")
                 else:
                     st.warning("Coluna 'perfil_ia' não encontrada para análise de alertas.")
             else:
-                st.info("Adicione o nome do vendedor nas interações para ver o desempenho individual.")
+                st.info("Para ver o desempenho individual por vendedor, peça para os vendedores preencherem o campo 'Seu nome'.")
 
-
-            # Objeções Mais Comuns
             st.write("---")
-            st.header("Objeções Mais Comuns")
+            st.header("🚫 Objeções Mais Comuns")
             if 'input_vendedor' in dados_filtrados.columns:
-                # Uma análise mais profunda de objeções exigiria processamento de linguagem natural
-                # Por agora, podemos agrupar pelas anotações mais comuns
-                st.info("Esta análise é baseada na descrição original do vendedor. Para categorização exata, seria necessário processamento de linguagem natural adicional.")
+                st.info("Esta análise é baseada na descrição original do vendedor. Para categorização exata, seria necessário processamento de linguagem natural (NLP) adicional.")
                 top_objecoes = dados_filtrados['input_vendedor'].value_counts().head(5)
-                st.dataframe(top_objecoes)
-                st.bar_chart(top_objecoes)
+                if not top_objecoes.empty:
+                    st.dataframe(top_objecoes, use_container_width=True)
+                    st.bar_chart(top_objecoes)
+                else:
+                    st.info("Não há objeções registradas no período para análise.")
             else:
                 st.warning("Coluna 'input_vendedor' não encontrada para análise de objeções.")
 
-            # Relatório Exportável
             st.write("---")
-            st.header("Exportar Relatório Detalhado")
+            st.header("🔽 Exportar Relatório Detalhado")
             csv_export = dados_filtrados.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="Baixar Relatório Completo (CSV)",
                 data=csv_export,
-                file_name=f"rodrigo_flow_relatorio_{start_date}_a_{end_date}.csv",
+                file_name=f"rodrigo_flow_relatorio_{datetime.date.today().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
                 key="download_csv_full"
             )
